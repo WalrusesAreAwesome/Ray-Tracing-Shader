@@ -1,0 +1,151 @@
+vec2 getFloorPoint(vec3 pos, vec3 ray) {
+    ray *= pos.y/ray.y; // get the ray to travel the height of the cam
+    return vec2(pos.xz - ray.xz); // subtract it from the height
+}
+
+float customLength(vec3 A) {
+    return sqrt(A.x + A.y + A.z);
+}
+
+vec3 getTileColor(vec2 point) {
+    vec2 tileCoord = round(point / 5.0);
+    float tileParity = mod(tileCoord.x + tileCoord.y, 2.0);
+
+    if (tileParity == 1.0) {
+        return vec3(0.9, 0.0, 0.0);
+    } else {
+        return vec3(0.0);
+    }
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    float PI = 3.141592;
+    float FOV_X = 135.0 / 2.0 / 3.0;
+    float FOV_Y = 135.0 / 2.0 / 3.0;
+    // Normalized pixel coordinates (from 0 to 1)
+    vec2 uv = fragCoord/iResolution.xy * 2.0 - 1.0;
+    uv.x *= iResolution.x / iResolution.y;
+    
+    // square shader only yippee
+    if (abs(uv.x) < 1.0) {
+        vec3 fragColor3 = vec3(0.0);
+        
+        bool hitSphere = false;
+        
+        vec3 sphereColor = vec3(0.75, 0.25, 0.75);
+        float reflectivity = 0.6;
+        vec3 skyColor = vec3(0.05, 0.0, 0.1);
+        vec3 white = vec3(1.0);
+        vec3 black = vec3(0.0);
+        
+        
+        float pitch = (uv.y * FOV_Y + iTime * 0.0) / 180.0 * PI;
+        float yaw = (uv.x * FOV_X + iTime * 0.0) / 180.0 * PI - iTime / 2.0;
+        //yaw += iTime / 2.0;            // comment out these lines for spin
+        
+        vec3 viewRay = vec3( cos(pitch)*sin(yaw), sin(pitch), cos(pitch)*cos(yaw) );
+
+        vec3 viewPos = vec3(10.0 * sin(iTime / 2.0), 6.0, -10.0 * cos(iTime / 2.0) + 10.0);
+        
+		//viewPos = vec3(0.0, 6.0, 0.0); // comment out these lines for spin
+
+        vec3 spherePos = vec3(0.0, 6.0 + sin(iTime), 10.0);
+        float sphereRadius = 1.0;
+        
+        
+        for (float d = 0.0; d <= 10.0; d += 1.0/16.0) {
+            vec3 distMarched = d * viewRay;
+            vec3 sphereIntersect = (distMarched + viewPos) - spherePos;
+            
+            if (length(sphereIntersect) <= sphereRadius) { // if intersects with sphere
+                
+                for (float p = -5.0; p >= -7.0; p--) { // binary search for the edge
+                    float amount = pow(2.0, p);
+                    vec3 distMarched = (d - amount) * viewRay;
+                    vec3 sphereIntersect = spherePos - (distMarched + viewPos);
+                    if (length(sphereIntersect) <= sphereRadius) {
+                        d -= amount;
+                    }
+                }
+                
+                vec3 distMarched = d * viewRay; // recalculate intersection
+                vec3 sphereIntersect =  (distMarched + viewPos) - spherePos;
+                
+                hitSphere = true; // set hit flag to true
+                fragColor3 += sphereColor * (1.0 - reflectivity); // add half the sphere color
+                
+                vec3 N = sphereIntersect / length(sphereIntersect); // Normalize
+                /*
+                Here lies a lot of things I don't need anymore
+                may they rest in being multiplied by 1 at the end, should they have existed
+                
+                vec3 A = vec3(1.0);
+                for (float i = 0.0; i <= 2.0; i++) {
+                    if (N[int(i)] >= 0.5) {
+                        A[int(i)] = (-N[int(mod(i+1.0, 3.0))] - N[int(mod(i+2.0, 3.0))]) / N[int(i)]; // ensure dot(N, A) = 0
+                        break; // side note: if you can tell me how not to call int() 5 times let me know
+                    }
+                }
+                A /= length(A); // normalize A
+                vec3 B = cross(N, A);
+                */
+                
+                //fragColor3 = (N);
+                //break;
+                
+                // N is normalized
+                // viewRay is normalized
+                
+                vec3 sphereRay = viewRay - (dot(N, viewRay) * 2.0 * N); // already normalized
+                
+                /*
+                fragColor3 = vec3(length(sphereRay) / PI * 3.0/4.0);
+                break;
+                
+                if (length(sphereRay) <= 2.0) {
+                    fragColor3 = vec3(1.0);
+                    break;
+                } else {
+                    fragColor3 = vec3(0.0);
+                    break;
+                }
+                
+                break;
+                */
+                
+                if (sphereRay.y > -0.1) { // if hit sky
+                    fragColor3 += skyColor * reflectivity; // half color sky
+                } else { // if hit floor
+                    vec2 floorPoint = getFloorPoint(spherePos + sphereIntersect, sphereRay);
+                    fragColor3 += getTileColor(floorPoint) * reflectivity; // half color floor
+                }
+                
+                break;
+            }
+        }
+        
+        float floorCamDist = abs(viewPos.y / tan(pitch));
+
+        if (!hitSphere) {
+            if ( (pitch > -0.04) ) {
+                fragColor3 += skyColor;
+            } else {
+
+                vec2 floorPoint = getFloorPoint(viewPos, viewRay);
+                /*
+                float floorDist = abs(viewPos.y / tan(pitch));
+                vec2 floorPoint = vec2(sin(yaw), cos(yaw)) * floorCamDist;
+                */
+                fragColor3 += getTileColor(floorPoint);
+
+            }
+        }
+        
+        //fragColor3 = viewRay;
+        fragColor = vec4(fragColor3, 1.0);
+        
+    } else {
+        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    }
+}

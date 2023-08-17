@@ -1,0 +1,170 @@
+struct HitInfo {
+    bool didHit;
+    float dst;
+    vec3 hitPoint;
+    vec3 normal;
+};
+
+HitInfo RaySphere(vec3 rayPos, vec3 dir, vec3 spherePos, float radius) {
+    HitInfo hitInfo;
+    // Thank you to Sebastian Lague for replacing linear algebra (for now) https://www.youtube.com/watch?v=Qz0KTGYJtUk
+    vec3 offsetPos = rayPos - spherePos;
+    
+    float b = dot(offsetPos, dir);
+    float c = dot(offsetPos, offsetPos) - radius * radius;
+
+    float discriminant = b * b - c;
+
+    if (discriminant >= 0.0) {
+        float dst = -b - sqrt(discriminant);
+        
+        if (dst > 0.0) {
+            hitInfo.didHit = true;
+            hitInfo.dst = dst;
+            hitInfo.hitPoint = rayPos + dir*dst;
+            hitInfo.normal = normalize(hitInfo.hitPoint - spherePos);
+        }
+    }
+    return hitInfo;
+}
+
+vec2 getFloorPoint(vec3 pos, vec3 ray) {
+    ray *= pos.y/ray.y; // get the ray to travel the height of the cam
+    return vec2(pos.xz - ray.xz); // subtract it from the height
+}
+
+float customLength(vec3 A) {
+    return sqrt(A.x + A.y + A.z); // manhatten distance
+}
+
+vec3 getTileColor(vec2 point) {
+    vec2 tileCoord = floor(point / 5.0);
+    float tileParity = mod(tileCoord.x + tileCoord.y, 2.0);
+    vec3 color = vec3(0.0);
+    
+    if (tileParity == 1.0) {
+        //return vec3(1.0);
+        color = vec3(0.75, 0.75, 0.0);
+    } else {
+        color = vec3(0.75, 0.0, 0.0);
+    }
+    
+    vec3 sunPos = vec3(-100.0, 200.0, -10.0);
+    
+    vec3 floorPos = vec3(point.x, 0.0, point.y);
+    vec3 toSunRay = sunPos - floorPos;
+    toSunRay /= length(toSunRay);
+    vec3 spherePos = vec3(0.0, 6.0 + sin(iTime) - sin(iTime), 20.0);
+    float sphereRadius = 2.0;
+    HitInfo hitInfo = RaySphere(floorPos, toSunRay, spherePos, sphereRadius);
+    
+    if (hitInfo.didHit) {
+        color /= 2.0;
+    }
+    
+    return color;
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    float PI = 3.141592;
+    float FOV_X = 135.0 / 2.0 / 3.0;
+    float FOV_Y = 135.0 / 2.0 / 3.0;
+    // Normalized pixel coordinates (from 0 to 1)
+    vec2 uv = fragCoord/iResolution.xy * 2.0 - 1.0;
+    uv.x *= iResolution.x / iResolution.y;
+    
+    // square shader only yippee
+    if (abs(uv.x) < 1.0) {
+        vec3 fragColor3 = vec3(0.0);
+        
+        bool hitSphere = false;
+        
+        vec3 sphereColor = vec3(0.95, 0.3, 0.75);
+        float reflectivity = 0.5;
+        vec3 skyColor = vec3(0.5, 0.5, 1.0);
+        vec3 white = vec3(1.0);
+        vec3 black = vec3(0.0);
+        
+        vec3 sunPos = vec3(-100.0, 200.0, -10.0);
+        
+        float pitch = 0.0;
+        float yaw = 0.0;
+        
+        vec3 X = vec3(1.0, 0.0, 0.0);
+        vec3 Y = vec3(0.0, 1.0, 0.0);
+        vec3 Z = vec3(0.0, 0.0, 1.0);
+        
+        float boxSize = 20.0;
+        
+        vec3 vrb = vec3(boxSize*uv, 40.0); // viewRayBasis
+        vrb /= length(vrb);
+        
+        pitch *= PI/180.0;
+        yaw *= PI/180.0;
+        vec3 viewRay = vec3( vrb.x*cos(yaw)+vrb.z*sin(yaw), 0.0, vrb.x*-sin(yaw)+vrb.z*cos(yaw)*cos(pitch) ); // do the math it works
+        viewRay += vec3( 0.0, vrb.y*cos(pitch)+vrb.z*sin(pitch), vrb.y*-sin(pitch) );
+        viewRay /= length(viewRay);
+        if (length(viewRay) < 0.99) {
+            return;
+        }
+        
+        vec3 viewPos = vec3(20.0 * sin(iTime / 2.0), 6.0, -20.0 * cos(iTime / 2.0) + 20.0);
+        
+		viewPos = vec3(0.0, 6.0, 0.0); // comment out these lines for spin
+
+        vec3 spherePos = vec3(0.0, 6.0 + sin(iTime) - sin(iTime), 20.0);
+        float sphereRadius = 2.0;
+        
+        
+        HitInfo hitInfo = RaySphere(viewPos, viewRay, spherePos, sphereRadius);
+        
+        if (hitInfo.didHit) {
+            vec3 sphereRay = viewRay - (dot(hitInfo.normal, viewRay) * 2.0 * hitInfo.normal); // already normalized
+
+            fragColor3 += sphereColor * (1.0 - reflectivity); // add sphere color
+
+            if (sphereRay.y > -0.1) { // if hit sky
+                fragColor3 += skyColor * reflectivity; // half color sky
+                /*
+                vec3 sphereToSun = sunPos - spherePos + sphereIntersect; // calculate sun vector
+                sphereToSun /= length(sphereToSun); // normalize
+                float sunVis = dot(sphereToSun, sphereRay); // compare sun ray to view ray
+
+                fragColor3 *= smoothstep(0.6, 1.0, sunVis) + 1.0;
+                */
+            } else { // if hit floor
+                vec2 floorPoint = getFloorPoint(hitInfo.hitPoint, sphereRay);
+                fragColor3 += getTileColor(floorPoint) * reflectivity; // half color floor
+            }
+
+            vec3 sphereToSun = sunPos - hitInfo.hitPoint; // calculate sun vector
+            sphereToSun /= length(sphereToSun);
+
+            // diffuse lighting
+            float light = smoothstep(-1.0, 1.0, dot(hitInfo.normal, sphereToSun) / 2.0 + 0.5);
+            fragColor3 *= vec3(light);
+
+            // specular lighting
+            vec3 sphereToView = -viewRay;
+            vec3 halfRay = sphereToSun + sphereToView;
+            halfRay /= length(halfRay);
+            float specular = max(dot(halfRay, hitInfo.normal), 0.0);
+            fragColor3 += vec3(pow(specular, 20.0)); // make sure negative doesn't add after squaring
+        } else {
+            if ( (viewRay.y >= -0.03) ) {
+                fragColor3 += skyColor;
+            } else {
+
+                vec2 floorPoint = getFloorPoint(viewPos, viewRay);
+                fragColor3 += getTileColor(floorPoint);
+
+            }
+        }
+        
+        fragColor = vec4(fragColor3, 1.0);
+        
+    } else {
+        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    }
+}
